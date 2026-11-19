@@ -1,0 +1,22 @@
+[project]
+name = "delivery-company-agent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Mr Abdelhake", email = "abdelhake.da@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "httpx>=0.28.1",
+    "pydantic-ai>=2.71.0",
+    "pydantic-ai-slim[web]>=2.71.0",
+    "python-dotenv>=1.2.4",
+]
+
+[project.scripts]
+delivery-company-agent = "delivery_company_agent:main"
+
+[build-system]
+requires = ["uv_build>=0.13.9,<0.14.0"]
+build-backend = "uv_build"
