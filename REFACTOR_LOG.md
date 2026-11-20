@@ -192,3 +192,42 @@ force `think: false` via `extra_body` if long empty pauses reappear.
 return reasons ("فشل التوصيل", "تضرر الشحنات") and `used_data_sources` reports
 both tools. Regression: "ما هي حالة الشحنة SHP-1020؟" still uses a single
 tool (`get_shipment_by_id`) → `final_result`, zero text parts.
+
+## 2026-11-20 — Fix: `reschedule_shipment` 404 + `update_shipment` TypeError
+
+**Symptom:** `reschedule_shipment` always failed with
+`API_ERROR: API error 404: {"detail":"Not Found"}` even for existing
+shipments; the agent reported it as a backend/database fault. Separately,
+`update_shipment` always failed with a masked `Unexpected error`.
+
+**Root cause:**
+1. `api_client.py` called `PATCH /shipments/{id}/reschedule`; the server only
+   exposes `PATCH /shipments/{id}/schedule` (verified against live
+   `/openapi.json` — "reschedule" appears nowhere in the spec).
+2. The tool forwarded `expected_delivery` verbatim; the API requires ISO
+   `YYYY-MM-DD` (`format: date`), so `05-08-2026` would have failed with 422
+   even after the path fix.
+3. `update_shipment` tool passed `updates=` kwarg but the client signature is
+   `update_shipment(shipment_id, shipment_data)` → `TypeError`, then masked as
+   `"API_ERROR: Unexpected error"` by the broad `except Exception` in
+   `_request` — every update call was broken.
+
+**Fix:**
+- `api_client.py`: `/reschedule` → `/schedule`.
+- `agent/agent_function_tool.py`: added `_to_iso_date` helper normalizing
+  `YYYY-MM-DD` / `DD-MM-YYYY` / `DD/MM/YYYY` / `YYYY/MM/DD` to ISO before the
+  API call; invalid input returns `INVALID_DATE_FORMAT` instead of hitting
+  the API. Docstring documents accepted formats.
+- `agent/agent_function_tool.py`: `update_shipment` now passes
+  `shipment_data=updates`.
+
+**Verified:** Tool-level calls against the live mock: `reschedule_shipment`
+with `07-08-2026` → 200 (normalized to `2026-08-07`); invalid date →
+`INVALID_DATE_FORMAT`; `update_shipment(weight_kg=9.6)` → 200. Regression:
+all 14 client endpoints re-checked against `/openapi.json` — full path/method
+match, payload keys (`status`, create-shipment fields) match schemas.
+
+**Residual note:** `ShippingAPIClient._request`'s `except Exception` still
+masks client-side programming errors (like the `TypeError` above) as API
+errors. Consider catching only `httpx.HTTPError` and letting bugs surface —
+left as-is to keep this fix surgical.

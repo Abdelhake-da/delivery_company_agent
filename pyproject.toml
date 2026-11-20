@@ -12,6 +12,7 @@ dependencies = [
     "pydantic-ai>=2.71.0",
     "pydantic-ai-slim[web]>=2.71.0",
     "python-dotenv>=1.2.4",
+    "streamlit>=1.67.0",
 ]
 
 [project.scripts]

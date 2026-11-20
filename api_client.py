@@ -100,7 +100,7 @@ class ShippingAPIClient:
         return self._patch(f"/shipments/{shipment_id}/status", {"status": status})
     
     def reschedule_shipment(self, shipment_id: str, expected_delivery: str) -> dict[str, Any]:
-        return self._patch(f"/shipments/{shipment_id}/reschedule", {"expected_delivery": expected_delivery})
+        return self._patch(f"/shipments/{shipment_id}/schedule", {"expected_delivery": expected_delivery})
     
     def cancel_shipment(self, shipment_id: str , reason: str | None = None) -> dict[str, Any]:
         return self._patch(f"/shipments/{shipment_id}/cancel", {"reason": reason})

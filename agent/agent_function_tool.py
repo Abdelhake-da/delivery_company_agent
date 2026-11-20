@@ -1,7 +1,19 @@
 
+from datetime import datetime
+
 from .agent import shipping_agent, ShippingAgentDeps, to_json
 from api_client import ShippingAPIError
 from pydantic_ai import RunContext
+
+
+def _to_iso_date(value: str) -> str | None:
+    value = value.strip()
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(value, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return None
 
 @shipping_agent.tool
 def create_shipment(
@@ -83,7 +95,7 @@ def update_shipment(
     try:
         data = ctx.deps.api.update_shipment(
             shipment_id=shipment_id,
-            updates=updates,
+            shipment_data=updates,
         )
         return to_json(data)
     except ShippingAPIError as error:
@@ -140,11 +152,17 @@ def reschedule_shipment(
     استخدم هذه الأداة عندما يطلب المستخدم تغيير موعد التسليم،
     أو تأجيله، أو إعادة جدولة تاريخ التسليم المتوقع.
 
+    حقل expected_delivery يقبل الصيغ: YYYY-MM-DD أو DD-MM-YYYY أو DD/MM/YYYY.
+
     """
+    iso_date = _to_iso_date(expected_delivery)
+    if iso_date is None:
+        return "INVALID_DATE_FORMAT. Use YYYY-MM-DD (e.g., 2026-08-05)."
+
     try:
         data = ctx.deps.api.reschedule_shipment(
             shipment_id=shipment_id,
-            expected_delivery=expected_delivery,
+            expected_delivery=iso_date,
         )
         return to_json(data)
     except ShippingAPIError as error:
