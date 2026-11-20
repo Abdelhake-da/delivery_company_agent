@@ -123,3 +123,72 @@ valid `OperationsAnswer`. `import web_chat` still OK.
 ever emits a text part anyway, `to_web()` will stream it. A hard guarantee
 would require filtering `TextPart` events in a custom UI layer (not done, kept
 as future option).
+
+## 2026-11-20 — Fix: Agent answers diagnostic questions with a single aggregate tool
+
+**Symptom:** For "أي فرع يحتاج متابعة من ناحية التأخير والمرتجعات" the model
+called only `get_branches_performance` → `final_result`. The answer ranked
+branches correctly but `possible_cause` fields were speculation (violating the
+`لا تخمّن` rule) because no evidence-level data was ever fetched.
+
+**Root cause:**
+1. Routing rules were a 1:1 intent→tool lookup; this question maps exactly to
+   `get_branches_performance` ("التأخير حسب الفرع، المرتجعات حسب الفرع" in its
+   docstring). No rule allowed multi-tool composition.
+2. The strict-output rule ("بمجرد حصولك على نتيجة أداة البيانات، استدعِ فوراً
+   final_result") forced finalization after the FIRST data tool.
+3. `get_shipments` docstring contained corrupted mojibake
+   (`OVÁszomall ð „`), hiding its `status` + `branch_name` filter capability —
+   the only per-branch drill-down path.
+
+**Fix (`agent/agent.py`, `agent/agent_get_tools.py`):**
+- Instructions: added a diagnostic-question rule — for follow-up/cause/fault
+  questions call the aggregate tool first, then at least one detail tool
+  (`get_returns` for return reasons, `get_delayed_shipments`, or
+  `get_shipments(status, branch_name)`) before `final_result`; reworded the
+  immediate-finalize rule to "once you have sufficient data".
+- `get_shipments` docstring: restored — lists real status enum
+  (`delivered, in_transit, delayed, returned, cancelled`, verified against
+  `/openapi.json`) and documents the per-branch evidence use case.
+- `get_returns` docstring: marked as the primary evidence source for why
+  returns are high in diagnostic questions.
+
+## 2026-11-20 — Fix: `OutputTokenLimitExceeded` — "Model token limit (provider default) exceeded"
+
+**Symptom:** In the `to_web()` chat, the run crashed with
+`Model token limit (provider default) exceeded before any response was generated.
+Increase the max_tokens model setting, or simplify the prompt...`
+
+**Root cause:**
+1. Raised by `pydantic_ai/_agent_graph.py` when the model returns
+   `finish_reason='length'` with no actionable parts (empty / blank / thinking-only).
+   "(provider default)" means `model_settings` had no `max_tokens` — the output
+   budget defaulted to whatever room the context window had left.
+2. `num_ctx` was 8192: instructions (~2–3K tokens) + 8 tool schemas with Arabic
+   docstrings + `final_result` schema + accumulated `to_web` history + tool
+   results (~1.5K tokens each) grew the prompt until ~0 output room remained,
+   so Ollama stopped at the context boundary before emitting anything.
+
+**Fix:**
+- `Modelfile` (new, project root): `PARAMETER num_ctx 65536` — 8x headroom,
+  within the model's 262144-token capability. Applied via
+  `ollama create gemma4:12b -f Modelfile` (verified `ollama show`: num_ctx 65536).
+- `agent/agent.py`: `model_settings` gained `'max_tokens': 2048` — explicit
+  output budget so the limit is defined, not provider-default.
+- `to_json` kept `max_items=25` — the 64K window makes further shrinking
+  unnecessary and keeps evidence lists complete.
+
+**Verified:** `test_agent.py` (single tool → `final_result`) and
+`repro_debug.py` (`get_shipments` → `final_result`, incl. one self-corrected
+validation retry) both produce valid `OperationsAnswer`; no token-limit error.
+
+**Watch out:** 64K ctx raises KV-cache VRAM use ~8x vs 8192 — drop back to
+32768 if memory pressure appears. If `thinking` is silently re-enabled by
+Ollama's `/v1` endpoint, reasoning tokens could still burn output budget —
+force `think: false` via `extra_body` if long empty pauses reappear.
+
+**Verified:** Live run of the same question now calls
+`get_branches_performance` → `get_returns` → `final_result`; answer cites real
+return reasons ("فشل التوصيل", "تضرر الشحنات") and `used_data_sources` reports
+both tools. Regression: "ما هي حالة الشحنة SHP-1020؟" still uses a single
+tool (`get_shipment_by_id`) → `final_result`, zero text parts.

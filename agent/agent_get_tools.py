@@ -21,8 +21,9 @@ def get_management_report(ctx:RunContext[ShippingAgentDeps]) -> str:
 def get_shipments(ctx:RunContext[ShippingAgentDeps], status: str | None = None, branch_name: str | None = None) -> str:
     """
     .تجلب هذه الأداة قائمة الشحنات مع إمكانية استخدام فلاتر اختيارية حسب الحالة واسم الفرع
-    . cancelled, returned, delayed, transitin , delivered: OVÁszomall ð „
+    . delivered, in_transit, delayed, returned, cancelled :قيم الحالة المتاحة
     . استخدم هذه الأداة عندما يسأل المستخدم عن قائمة الشحنات أو عن بيانات شحنات مفلترة
+    . أو عندما تحتاج دليلاً تفصيلياً عن شحنات فرع معين بحالة معينة (مثل الشحنات المتأخرة في جدة)
     """
     try:
         return to_json(ctx.deps.api.get_shipments(status, branch_name))
@@ -80,8 +81,9 @@ def get_returned_shipments(ctx:RunContext[ShippingAgentDeps]) -> str:
 @shipping_agent.tool
 def get_returns(ctx:RunContext[ShippingAgentDeps]) -> str:
     """
-   تجلب هاته الأدات سجلات المرتجعات مع أسباب الإرجاع و قيم الإسترداد 
-   إستخدم هاته الأداة عندما يسال المستخدم عن أسباب المرتجعات او مشكلات الإرجاع أو المبالغ المتردة او تتجليل المرتجعات
+   تجلب هذه الأداة سجلات المرتجعات مع أسباب الإرجاع وقيم الاسترداد
+   استخدم هذه الأداة عندما يسأل المستخدم عن أسباب المرتجعات أو مشكلات الإرجاع أو المبالغ المستردة أو تحليل المرتجعات
+   وهي مصدر الدليل الأساسي لتفسير سبب ارتفاع المرتجعات في الأسئلة التشخيصية
     """
     try:
         return to_json(ctx.deps.api.get_returns())
