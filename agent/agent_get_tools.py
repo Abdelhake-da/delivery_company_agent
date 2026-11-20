@@ -13,7 +13,7 @@ def get_management_report(ctx:RunContext[ShippingAgentDeps]) -> str:
     . استخدم هذه الأداة عندما يسأل المستخدم عن ملخص الشركة أو التقرير التنفيذي
     """
     try:
-        return ctx.deps.api.get_management_overview()
+        return to_json(ctx.deps.api.get_management_overview())
     except ShippingAPIError as e:
         return "API Error: " + str(e)
 

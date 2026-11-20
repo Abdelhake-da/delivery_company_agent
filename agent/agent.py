@@ -16,8 +16,35 @@ load_dotenv()
 class ShippingAgentDeps:
     api: ShippingAPIClient
 
-def to_json(data: dict) -> str:
-    return json.dumps(data, ensure_ascii=False, indent=2)
+def to_json(data: dict, max_items: int = 25) -> str:
+    """
+    Serialize API data to a compact JSON string safe for the LLM context window.
+    - Removes null values recursively to save tokens.
+    - Truncates long lists to `max_items` and appends a truncation notice.
+    - Uses compact separators (no indentation) to save tokens.
+    """
+    if isinstance(data, dict):
+        processed = {}
+        for k, v in data.items():
+            if isinstance(v, list):
+                if len(v) > max_items:
+                    processed[k] = v[:max_items]
+                    processed[f"{k}_truncated"] = f"{len(v) - max_items} more items omitted"
+                else:
+                    processed[k] = v
+            else:
+                processed[k] = v
+        data = processed
+
+    def _drop_nulls(obj):
+        if isinstance(obj, dict):
+            return {k: _drop_nulls(v) for k, v in obj.items() if v is not None}
+        if isinstance(obj, list):
+            return [_drop_nulls(v) for v in obj]
+        return obj
+
+    data = _drop_nulls(data)
+    return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
 
 
 ollama_model = OpenAIChatModel(
@@ -34,40 +61,24 @@ shipping_agent = Agent(
     retries={'tools': 3, 'output': 4}, 
     instructions="""
     أنت مساعد عمليات داخلي لشركة توصيل.
-    هدفك مساعدة الإدارة على الاستعلام عن الشحنات وتحليل العمليات وتنفيذ مهام إدارة الشحنات عبر API.
-
-    لديك أدوات فعلية تستطيع من خلالها:
-    - إنشاء شحنة جديدة.
-    - تعديل بيانات شحنة.
-    - تغيير حالة شحنة.
-    - إعادة جدولة موعد التسليم.
-    - إلغاء شحنة مع سبب.
-    - الاستعلام عن الشحنات والمدفوعات والمرتجعات وأداء الفروع.
-    - إعداد تقرير تنفيذي شامل اعتمادًا على بيانات الشحنات والمدفوعات والفروع والتأخير والمرتجعات.
+    هدفك مساعدة الإدارة على الاستعلام عن الشحنات والمدفوعات والمرتجعات وأداء الفروع عبر أدوات API المتاحة.
 
     قواعد استخدام الأدوات:
-    - إذا طلب المستخدم إنشاء شحنة وكانت كل البيانات المطلوبة متوفرة، استخدم أداة create_shipment.
-    - إذا طلب المستخدم تعديل بيانات شحنة وكانت البيانات واضحة، استخدم أداة update_shipment.
-    - إذا طلب المستخدم تغيير حالة شحنة، استخدم أداة change_shipment_status.
-    - إذا طلب المستخدم إعادة جدولة التسليم، استخدم أداة reschedule_shipment.
-    - إذا طلب المستخدم إلغاء شحنة وذكر السبب، استخدم أداة cancel_shipment.
-    - إذا طلب المستخدم تقريرًا تنفيذيًا، أو ملخصًا إداريًا شاملًا، أو نظرة عامة عن وضع الشركة، استخدم أداة get_executive_report_data.
+    - إذا طلب المستخدم ملخصاً إدارياً عاماً أو تقريراً تنفيذياً، استخدم get_management_report.
+    - إذا طلب المستخدم قائمة الشحنات أو تفاصيلها، استخدم get_shipments أو get_shipment_by_id.
+    - إذا طلب المستخدم الشحنات المتأخرة، استخدم get_delayed_shipments.
+    - إذا طلب المستخدم الشحنات المرتجعة، استخدم get_returned_shipments.
+    - إذا طلب المستخدم سجلات أو أسباب المرتجعات، استخدم get_returns.
+    - إذا طلب المستخدم المدفوعات أو الملخص المالي، استخدم get_payments_summary.
+    - إذا طلب المستخدم أداء الفروع أو مقارنتها، استخدم get_branches_performance.
     - إذا كانت البيانات ناقصة، اسأل فقط عن البيانات الناقصة ولا تنفذ الأداة.
     - لا تقل إنك لا تستطيع التنفيذ إذا كانت الأداة المناسبة متاحة والبيانات مكتملة.
     - لا تعرض JSON الخام للمستخدم إلا إذا طلب ذلك صراحة.
-    - بعد أي عملية إنشاء أو تعديل أو إلغاء، لخّص ما تم تنفيذه بوضوح.
-    
-    - إذا استخدمت أداة draft_follow_up_message، فضع نص الرسالة الناتجة داخل draft_messages.
-    - لا تضع نص مسودة الرسالة داخل proposed_actions فقط.
-    - يمكن إضافة إجراء من نوع message_draft داخل proposed_actions، لكن نص الرسالة الكامل يجب أن يكون في draft_messages.
-    - لا ترسل الرسالة فعليًا، بل جهزها فقط للمراجعة البشرية.
 
     قواعد السلامة التشغيلية:
     - لا تخمّن أي رقم أو حالة شحنة.
-    - اعتمد على الأدوات وبيانات API.
-    - لا تستخدم أداة تنفيذية إذا كان الطلب غامضًا.
-    - لا تلغي شحنة إلا إذا ذكر المستخدم سبب الإلغاء.
-    - إذا حاول المستخدم حذف شحنة نهائيًا، وضّح أن النظام يستخدم إلغاءً آمنًا soft cancellation بدل الحذف النهائي.
+    - اعتمد على الأدوات وبيانات API فقط.
+    - لا تستخدم أداة إذا كان الطلب غامضاً.
     - اجعل الإجابة بالعربية، مختصرة، عملية، ومناسبة لفريق الإدارة.
 
     شكل الإجابة:
