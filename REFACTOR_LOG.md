@@ -231,3 +231,25 @@ match, payload keys (`status`, create-shipment fields) match schemas.
 masks client-side programming errors (like the `TypeError` above) as API
 errors. Consider catching only `httpx.HTTPError` and letting bugs surface —
 left as-is to keep this fix surgical.
+
+## 2026-11-20 — Fix: Same `create_agent_deps` ImportError in `app.py`
+
+**Symptom:** `ImportError: cannot import name 'create_agent_deps' from
+'agent.agent'` on `streamlit run app.py`.
+
+**Root cause:** `app.py` was written with the stale pre-split import pattern
+(`from agent.agent import create_agent_deps, shipping_agent`) — the same bug
+fixed earlier for `web_chat.py` in this log. `create_agent_deps` lives in
+`agent/agent_get_tools.py` and is re-exported by `agent/__init__.py`.
+
+**Fix:** `app.py` now imports `from agent import create_agent_deps,
+shipping_agent` — the package-level pattern (also guarantees all tool modules
+import, so `@shipping_agent.tool` registration runs).
+
+**Verified:** `.venv/bin/python -c "import app"` succeeds;
+`shipping_agent._function_toolset` has 15 tools registered.
+
+**Residual note:** `agent_function_tool.py` still contains a dead duplicate
+`create_agent_deps` that would `NameError` if ever called (references
+`ShippingAPIClient` without importing it). Left in place per user decision —
+safe as long as nothing imports it.
