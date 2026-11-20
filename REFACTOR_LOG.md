@@ -28,3 +28,31 @@
 
 **Verified:** `test_agent.py` produces schema-valid output in ToolOutput mode,
 including the originally failing cancelled-shipment scenario; tools unaffected.
+
+## 2026-11-20 — Fix: ImportError after flat `agent.py` → `agent/` package split
+
+**Symptom:** `ImportError: cannot import name 'create_agent_deps' from 'agent.agent'`
+on uvicorn startup (`web_chat.py`).
+
+**Root cause:** incomplete package split. `create_agent_deps` moved to
+`agent/agent_get_tools.py`, which itself imported nonexistent modules
+`.models`, `.api`, `.utils`. `agent/__init__.py` was left empty, so nothing
+imported the tools module — meaning tool registration via
+`@shipping_agent.tool` decorators never ran (agent would have served with 0
+tools) and `test_agent.py`'s `from agent import ...` also broke.
+
+**Fix:**
+- `agent/agent_get_tools.py`: imports repointed to existing modules
+  (`from .agent import shipping_agent, ShippingAgentDeps, to_json` +
+  `from api_client import ShippingAPIError, ShippingAPIClient`).
+- `agent/__init__.py`: re-exports `shipping_agent` + `create_agent_deps`
+  (guarantees tools register whenever the package is imported).
+- `web_chat.py`: imports `create_agent_deps` from `agent.agent_get_tools`.
+
+**Verified:** `import web_chat` succeeds, `from agent import ...` works for
+`test_agent.py`, all 4 tools registered, `create_agent_deps()` builds deps.
+
+**Note:** `agent/agent.py` and `agent_get_tools.py` still import root-level
+`api_client`/`models` — works while the server runs from the project root.
+If the package is ever used outside this directory, move those modules into
+the package (the originally planned `.api`/`.models`/`.utils` split).
