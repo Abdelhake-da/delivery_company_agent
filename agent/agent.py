@@ -2,7 +2,7 @@ import json
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
-from pydantic_ai import Agent, NativeOutput
+from pydantic_ai import Agent, NativeOutput, ToolOutput
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.ollama import OllamaProvider
 
@@ -56,8 +56,15 @@ ollama_model = OpenAIChatModel(
 shipping_agent = Agent(
     ollama_model,  
     deps_type=ShippingAgentDeps,
-    model_settings={'thinking': False},
-    output_type=OperationsAnswer,
+    model_settings={'thinking': False, 'temperature': 0.0},
+    output_type=ToolOutput(
+        OperationsAnswer,
+        name="final_result",
+        description=(
+            "الأداة الوحيدة لإنهاء المهمة وتسليم الإجابة النهائية المهيكلة. "
+            "استدعِها فوراً بعد جمع البيانات. لا ترسل أي نص خارج هذه الأداة."
+        ),
+    ),
     retries={'tools': 3, 'output': 4}, 
     instructions="""
     أنت مساعد عمليات داخلي لشركة توصيل.
@@ -81,16 +88,20 @@ shipping_agent = Agent(
     - لا تستخدم أداة إذا كان الطلب غامضاً.
     - اجعل الإجابة بالعربية، مختصرة، عملية، ومناسبة لفريق الإدارة.
 
-    شكل الإجابة:
+    قاعدة صارمة على شكل الرد (الأهم):
+    - ممنوع منعاً باتاً كتابة أي نص عادي في رسالة الرد المباشرة: لا ملخص، لا شرح، لا اعتذار، لا نقاط Markdown. حقل النص (content) يجب أن يبقى فارغاً تماماً دائماً.
+    - كل رد منك هو استدعاء أداة فقط (tool_calls): إما أداة جلب بيانات (get_*) أو أداة التسليم النهائي (final_result).
+    - بمجرد حصولك على نتيجة أداة البيانات، استدعِ فوراً ومباشرةً أداة final_result في الخطوة التالية دون كتابة أي حرف.
+    - إذا طُلب منك إعادة المحاولة أو وردك خطأ تحقق، لا تعتذر نصياً أبداً: صحح المعاملات واستدعِ final_result مباشرة.
+    - إذا كان السؤال غامضاً أو ناقص البيانات، ضع سؤال التوضيح داخل حقل answer في final_result أيضاً.
+    - ممنوع كتابة JSON الخام كنص عادي في رسالة الرد المباشرة.
+
+    شكل الإجابة داخل final_result:
     - اكتب answer كملخص واضح لما حدث أو لما وجدته.
     - املأ used_data_sources بأسماء الأدوات أو مسارات API المستخدمة.
     - أضف key_metrics عند وجود أرقام مهمة.
     - أضف operational_insights عند وجود مشكلة تشغيلية أو ملاحظة مهمة.
     - أضف proposed_actions عند وجود إجراء مقترح أو خطوة متابعة.
-
-    قاعدة تقنية صارمة جداً:
-    - لتسليم الإجابة النهائية، يجب عليك دائماً استدعاء الأداة المخصصة للنتيجة النهائية (final_result) وتمرير البيانات إليها.
-    - إياك أن تكتب كود JSON كنص عادي في رسالة الرد المباشرة.
 
     عند استدعاء أداة final_result، التزم حرفيًا بأسماء المفاتيح الإنجليزية التالية ولا تستبدلها بأي أسماء أخرى:
     - داخل key_metrics استخدم فقط: name, value, meaning

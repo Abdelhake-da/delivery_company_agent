@@ -84,3 +84,42 @@ crashed with `UnexpectedModelBehavior: Exceeded maximum output retries`.
 
 **Verified:** `run_sync("ما الشحنات المتأخرة...")` now returns a valid
 `OperationsAnswer` via `final_result` on the first attempt.
+
+## 2026-11-20 — Fix: Conversational text bubbles appear before `final_result` in web UI
+
+**Symptom:** In `to_web()` chat, the model emitted 3+ conversational text bubbles
+(a Markdown summary of the data, then apologies like "أعتذر عن الخطأ التقني...")
+before finally calling `final_result`. The structured card appeared only at the
+bottom after wasted retries.
+
+**Root cause:**
+1. `output_type=OperationsAnswer` (plain `AutoOutputSchema`) left the final call
+   unconstrained; after receiving a large tool result, `gemma4:12b` preferred
+   writing the report as plain `content` text instead of a `final_result` call.
+2. Ollama's `/v1` adapter does not strictly enforce tool-choice, so plain text
+   was allowed at the output step.
+3. Instructions banned only *raw JSON* as text — implicitly inviting a readable
+   Markdown text answer — and said nothing about empty `content`. On each
+   `no_output` retry the model apologized *as text* again, so all retries were
+   consumed by text bubbles.
+
+**Fix (`agent/agent.py`):**
+- `output_type=ToolOutput(OperationsAnswer, name="final_result", description=...)`
+  with an explicit Arabic description stating it is the only way to finish.
+- `model_settings` gained `temperature: 0.0` to reduce preamble improvisation.
+- Instructions rewritten: new top-priority section forbids ANY plain text
+  (no summary, explanation, apology, or Markdown — `content` must stay empty);
+  every response must be a tool call only (`get_*` or `final_result`); after a
+  data tool result, call `final_result` immediately; on validation errors,
+  correct args silently instead of apologizing; ambiguous questions go inside
+  `final_result.answer`.
+
+**Verified:** Live runs against Ollama for "ما الشحنات المتأخرة؟" and
+"ما هي حالة الشحنة SHP-1020؟": tool calls were `get_delayed_shipments` /
+`get_shipment_by_id` → `final_result`, `TEXT PARTS: []` (zero), output is a
+valid `OperationsAnswer`. `import web_chat` still OK.
+
+**Residual note:** A prompt-based guarantee is not absolute — if `gemma4:12b`
+ever emits a text part anyway, `to_web()` will stream it. A hard guarantee
+would require filtering `TextPart` events in a custom UI layer (not done, kept
+as future option).
